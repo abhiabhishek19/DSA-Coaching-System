@@ -1,105 +1,172 @@
-# 🧠 DSA Coach — AI-Powered Interview Preparation Agent
+# 🧠 DSA Coach — Agentic AI-Powered Interview Preparation
 
-An agentic AI system built with **LangGraph + LangChain** that coaches you
-through daily DSA practice using real LeetCode problems.
+A personal DSA preparation assistant built with **LangGraph + LangChain + Groq**. You describe your approach in plain English — the agent generates code from it, you test it on LeetCode yourself, and if it fails, the agent analyses what went wrong and helps you fix it.
 
-## What it does
+---
 
-1. **You pick topics** — type "Array, DP, Graph" and it fuzzy-matches to the dataset's 63 official tags
-2. **It picks 5 problems** — 2 Easy + 2 Medium + 1 Hard from 2,641 LeetCode problems (never repeats)
-3. **You describe your approach** — plain English, as detailed as you want
-4. **It generates code** — C++ or Python, based ONLY on your described logic (nothing extra)
-5. **You test on LeetCode** — copy the code, paste it, run it yourself
-6. **You report back** — success → next question. Failure → paste the error
-7. **It analyses the failure** — approach issue vs implementation bug, with specific fixes
-8. **You choose** — fix it yourself or let the AI auto-fix within your approach
-9. **Session summary** — tracks all 5 problems, attempts, and outcomes
+## How It Works
 
-## Tech Stack
+1. **Pick your topics** — type topics like "Array, Dynamic Programming, Graph" and the system fuzzy-matches them to the dataset's official tags
+2. **Choose your language** — C++ or Python
+3. **Get 5 curated problems daily** — selected from a curated LeetCode dataset by difficulty (Easy / Medium / Hard), problems never repeat across sessions
+4. **Describe your approach** — plain English; the AI generates code based **only** on your described logic, nothing more
+5. **Test on LeetCode yourself** — copy the generated code, paste it into LeetCode's editor, and run it
+6. **Report the result** — passed → next question; failed → paste the error output
+7. **Get targeted analysis** — the agent classifies whether your approach is conceptually flawed or just has an implementation bug, then gives line-level debugging feedback
+8. **Choose your fix** — fix it yourself, let the AI auto-fix within your approach, or revise your approach entirely
+9. **Session summary** — shows all attempted, solved, and skipped questions at the end
 
-- **LangGraph** — StateGraph with conditional edges, iterative loops, Human-in-the-Loop (`interrupt()`)
-- **LangChain** — LLM calls, prompt templates, message management
-- **Groq (free)** — `llama-3.3-70b-versatile` for code generation and analysis
-- **Streamlit** — full web UI with progress tracking, code display, session history
-- **Dataset** — [newfacade/LeetCodeDataset](https://github.com/newfacade/LeetCodeDataset) v0.3.1 (2,641 problems)
+---
 
 ## LangGraph Workflow
 
 ```
-START → QuestionPicker → QuestionDisplay [HITL] → UserApproach [HITL]
-     → CodeGenerator → LeetCodeHITL [HITL]
-         ├── success → NextQuestion → (loop or SessionSummary → END)
-         └── failure → ApproachJudge
-                          ├── approach_ok   → CodeAnalyser [HITL]
-                          │                      ├── auto_fix  → CodeGenerator (loop)
-                          │                      └── self_edit → LeetCodeHITL (loop)
-                          └── approach_wrong → ApproachWrong [HITL] → CodeGenerator
+START
+  │
+  ▼
+QuestionPickerNode         — loads dataset, fuzzy-matches topics, selects 5 problems
+  │
+  ▼
+QuestionDisplayNode        — renders the problem; waits for user to read [HITL]
+  │
+  ▼
+UserApproachNode           — collects approach text or skip signal [HITL]
+  │
+  ├── __SKIP__ ──────────────────────────────────────────────► NextQuestionNode
+  │
+  └── approach text
+        │
+        ▼
+      CodeGeneratorNode    — LLM generates C++ or Python from approach only
+        │
+        ▼
+      LeetCodeHITLNode     — user tests on LeetCode, reports result [HITL]
+        │
+        ├── success ──────────────────────────────────────────► NextQuestionNode
+        │
+        └── failure (+ pasted error)
+              │
+              ▼
+            ApproachJudgeNode     — classifies: conceptual flaw vs implementation bug
+              │
+              ▼  (always, regardless of verdict)
+            CodeAnalyserNode      — root-cause analysis + fix recommendation [HITL]
+              │
+              ├── self_edit    ──► LeetCodeHITLNode   (user edits on LeetCode)
+              ├── auto_fix     ──► CodeGeneratorNode  (AI regenerates with fix context)
+              └── revise_approach ► ApproachWrongNode [HITL] ──► CodeGeneratorNode
+
+NextQuestionNode
+  ├── more questions ──► QuestionDisplayNode  (loop)
+  └── all done       ──► SessionSummaryNode [HITL] ──► END
 ```
+
+**Key design decisions:**
+- `ApproachJudgeNode` always routes to `CodeAnalyserNode` — the user sees the full code analysis regardless of whether the approach is flawed or just buggy
+- Skipping a question bypasses `CodeGeneratorNode` and `LeetCodeHITLNode` entirely and goes straight to `NextQuestionNode` — skipped questions are tracked separately from attempted ones
+- `CodeGeneratorNode` receives previous analysis as context on auto-fix retries, staying strictly within the user's original approach
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Agentic workflow | LangGraph (StateGraph, MemorySaver, interrupt) |
+| LLM | Groq — `llama-3.3-70b-versatile` (free tier) |
+| LLM framework | LangChain, LangChain-Groq |
+| UI | Streamlit |
+| Dataset | [newfacade/LeetCodeDataset](https://github.com/newfacade/LeetCodeDataset) v0.3.1 |
+| Session memory | LangGraph MemorySaver (in-memory checkpointing) |
+| Environment | Python 3.9+, UV package manager |
+
+---
+
+## Project Structure
+
+```
+dsa-coach/
+├── app.py                                    ← Streamlit UI — all screens and HITL handling
+├── graph.py                                  ← LangGraph StateGraph, nodes, edges, routers
+├── nodes.py                                  ← All 10 node functions with full logic
+├── state.py                                  ← DSAState TypedDict definition
+├── dataset.py                                ← Dataset loading, fuzzy matching, question selection
+├── requirements.txt
+├── .env                                      ← API keys (not committed)
+├── .gitignore
+├── seen_ids.json                             ← Auto-created; tracks seen problems across sessions
+└── LeetCodeDataset-v0.3.1-train.jsonl        ← Dataset file (download separately — see Setup)
+```
+
+---
 
 ## Setup
 
-### 1. Clone and install
+### 1. Clone and initialise
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/dsa-coach
 cd dsa-coach
-uv venv && source .venv/bin/activate   # or .venv\Scripts\activate on Windows
+uv init .
+uv venv
+```
+
+Activate the virtual environment:
+```bash
+# Windows
+.venv\Scripts\activate
+
+# Mac / Linux
+source .venv/bin/activate
+```
+
+### 2. Install dependencies
+
+```bash
 uv add -r requirements.txt
 ```
 
-### 2. Get the dataset
+### 3. Download the dataset
 
-Download `LeetCodeDataset-v0.3.1-train.jsonl.gz` from:
-https://github.com/newfacade/LeetCodeDataset/tree/main/data
+Download `LeetCodeDataset-v0.3.1-train.jsonl` (or the `.jsonl.gz` version) from:
 
-Place it in the project root (same folder as `app.py`).
+> https://github.com/newfacade/LeetCodeDataset/tree/main/data
 
-### 3. Set up API keys
+Place it in the project root — the same folder as `app.py`. Both plain `.jsonl` and gzipped `.jsonl.gz` are supported automatically.
 
-Create a `.env` file:
+### 4. Create your `.env` file
+
 ```
 GROQ_API_KEY=your_groq_api_key_here
 ```
 
 Get a free Groq API key at: https://console.groq.com
 
-### 4. Run
+### 5. Run
 
 ```bash
 streamlit run app.py
 ```
 
-Opens at http://localhost:8501
+Opens at `http://localhost:8501`
 
-## Project Structure
-
-```
-dsa-coach/
-├── app.py                              ← Streamlit UI (all screens)
-├── graph.py                            ← LangGraph StateGraph + routers
-├── nodes.py                            ← All 10 node functions
-├── state.py                            ← DSAState TypedDict definition
-├── dataset.py                          ← Dataset loading, filtering, selection
-├── requirements.txt
-├── .env                                ← API keys (not committed)
-├── .gitignore
-├── seen_ids.json                       ← Auto-created: tracks seen problems
-└── LeetCodeDataset-v0.3.1-train.jsonl.gz ← Dataset (download separately)
-```
+---
 
 ## Features
 
-- **Fuzzy topic matching** — "dp" → "Dynamic Programming", "bfs" → "Breadth-First Search"
-- **Never repeats problems** — `seen_ids.json` tracks every problem across sessions
-- **Language choice** — C++ or Python code generation
-- **Constrained code generation** — LLM is strictly prohibited from adding logic you did not describe
-- **Approach judge** — distinguishes implementation bugs from conceptual flaws
-- **Iterative retry loop** — up to configurable attempts per problem
-- **Session history** — sidebar shows all completed problems in real time
+- **Fuzzy topic matching** — "dp" resolves to "Dynamic Programming", "bfs" to "Breadth-First Search", and so on across all dataset tags
+- **No repeated problems** — `seen_ids.json` tracks every problem shown across all sessions; a reset button clears it when needed
+- **Constrained code generation** — the LLM is instructed to implement only what you described, adding `// TODO` comments for any parts you left unspecified
+- **Language choice** — C++ or Python per session; C++ uses LeetCode's standard class structure
+- **Skip without penalty** — skipped questions bypass code generation entirely and are tracked separately in the session summary
+- **Three-way fix choice** — after a failure analysis: fix it yourself, auto-fix within your approach, or scrap the approach and start fresh
+- **Session summary** — attempted, solved, and skipped questions shown separately with your approach recorded for each
 
-## Phase 2 (planned)
+---
 
-- Voice input via Whisper API
+## Phase 2 (Planned)
+
+- Voice input via Whisper API for approach description
 - Local code execution against dataset test cases (no LeetCode needed)
-- Progress tracking dashboard across multiple sessions
-- Topic-based weak area identification
+- Multi-session progress tracking and weak-area identification by topic
+- Difficulty adaptation based on historical performance
